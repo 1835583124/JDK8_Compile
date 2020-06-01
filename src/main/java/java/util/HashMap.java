@@ -240,7 +240,7 @@ public class HashMap<K, V> extends AbstractMap<K, V>
      * The maximum capacity, used if a higher value is implicitly specified
      * by either of the constructors with arguments.
      * MUST be a power of two <= 1<<30.
-     * 最大容量
+     * 桶的最大容量
      */
     static final int MAXIMUM_CAPACITY = 1 << 30;
 
@@ -627,18 +627,33 @@ public class HashMap<K, V> extends AbstractMap<K, V>
      * @return the node, or null if none
      */
     final Node<K, V> getNode(int hash, Object key) {
+
+        //引用当前hashMap的散列表
         Node<K, V>[] tab;
+        //first:桶位中的头元素 e:临时元素
         Node<K, V> first, e;
+        //table数组长度
         int n;
+
         K k;
+
+        //桶有数据，不为空
         if ((tab = table) != null && (n = tab.length) > 0 &&
                 (first = tab[(n - 1) & hash]) != null) {
+
+            //第一种情况：（检查第一个元素）定位出来的桶位元素 即为个体的数据
             if (first.hash == hash && // always check first node
                     ((k = first.key) == key || (key != null && key.equals(k))))
                 return first;
+
+            //桶位是链表或者红黑树
             if ((e = first.next) != null) {
+
+                //第二种情况：桶位是红黑树
                 if (first instanceof TreeNode)
                     return ((TreeNode<K, V>) first).getTreeNode(hash, key);
+
+                //第三种情况：桶位形成链表
                 do {
                     if (e.hash == hash &&
                             ((k = e.key) == key || (key != null && key.equals(k))))
@@ -781,51 +796,103 @@ public class HashMap<K, V> extends AbstractMap<K, V>
      * Otherwise, because we are using power-of-two expansion, the
      * elements from each bin must either stay at same index, or move
      * with a power of two offset in the new table.
+     * 为什么需扩容？
+     * 为了解决哈希冲突导致的链化影响查询效率的问题，扩容通过能解决此问题。
      *
      * @return the table
      */
     final Node<K, V>[] resize() {
+        //oldTab:引用扩容之前的哈希表
         Node<K, V>[] oldTab = table;
+        //oldCap:引用扩容之前的数组长度
         int oldCap = (oldTab == null) ? 0 : oldTab.length;
+        //oldThr:表示扩容之前的阈值，触发本次扩容的阈值
         int oldThr = threshold;
+        //newCap:扩容之后table的大小，
+        //newThr:扩容之后在次出发扩容的条件
         int newCap, newThr = 0;
+
+        //条件如果成立，说明hashMap的散列表已经初始化过了，是一次正常扩容
         if (oldCap > 0) {
+            //扩容之前的table数组大小已经达到最大阈值，则不扩容，且设置扩容条件为 int 最大值。
             if (oldCap >= MAXIMUM_CAPACITY) {
                 threshold = Integer.MAX_VALUE;
                 return oldTab;
-            } else if ((newCap = oldCap << 1) < MAXIMUM_CAPACITY &&
+            }
+            //oldCap左移一位实现数据翻倍，并且newCap小于数组最大值 且 扩容之前的数组长度小于16
+            //这种情况下，则下一次扩容的阈值 等于当前阈值翻倍
+            else if ((newCap = oldCap << 1) < MAXIMUM_CAPACITY &&
                     oldCap >= DEFAULT_INITIAL_CAPACITY)
                 newThr = oldThr << 1; // double threshold
-        } else if (oldThr > 0) // initial capacity was placed in threshold
-            newCap = oldThr;
-        else {               // zero initial threshold signifies using defaults
-            newCap = DEFAULT_INITIAL_CAPACITY;
-            newThr = (int) (DEFAULT_LOAD_FACTOR * DEFAULT_INITIAL_CAPACITY);
         }
+        //oldCap == 0，说明hashMap中的散列表是null，使用非默认构造方法创建的map，第一次插入元素会走到这里
+        //1.new HashMap(initialCapacity,loadFactor)
+        //2.new HashMap(initialCapacity)
+        //3.new HashMap(map)并且map有数据
+        else if (oldThr > 0) // initial capacity was placed in threshold
+        {
+            newCap = oldThr;
+        }
+        //oldCap == 0，oldThr == 0
+        //new HashMap()
+        // 调用默认构造方法创建的map，第一次插入元素会走到这里
+        // 如果旧容量旧扩容门槛都是0，说明还未初始化过，则初始化容量为默认容量，扩容门槛为默认容量*默认装载因子
+        else {               // zero initial threshold signifies using defaults
+            newCap = DEFAULT_INITIAL_CAPACITY;//16
+            newThr = (int) (DEFAULT_LOAD_FACTOR * DEFAULT_INITIAL_CAPACITY);//12
+        }
+
         if (newThr == 0) {
+            // 如果新扩容门槛为0，则计算为容量*装载因子，但不能超过最大容量
             float ft = (float) newCap * loadFactor;
             newThr = (newCap < MAXIMUM_CAPACITY && ft < (float) MAXIMUM_CAPACITY ?
                     (int) ft : Integer.MAX_VALUE);
         }
+
+        // 赋值扩容阈值为新阈值
         threshold = newThr;
+        //创建一个更长、更大的数组
         @SuppressWarnings({"rawtypes", "unchecked"})
         Node<K, V>[] newTab = (Node<K, V>[]) new Node[newCap];
         table = newTab;
+        //说明hashMap本次扩容之前，table不为null
         if (oldTab != null) {
             for (int j = 0; j < oldCap; ++j) {
+                //当前node节点
                 Node<K, V> e;
+                //桶中的第一个元素不为空，即有数据，但是不知道是单个数据还是链表还是红黑树不知道
                 if ((e = oldTab[j]) != null) {
+                    //清空旧桶，便于GC回收内存
                     oldTab[j] = null;
+                    //第一种情况：当前桶位只有一个元素，从未发生碰撞，这情况直接计算出当前元素存
+                    // 放在 新数组 中的位置 然后扔进去就可以了
+                    // 因为每次都扩容两倍，所以这里的第一个元素搬移到新桶的时候新桶肯定还没有元素
                     if (e.next == null)
                         newTab[e.hash & (newCap - 1)] = e;
+
+                    //第二种情况：判断当前节点已经树化，则把这颗树打散成两颗树插入到新桶中去
                     else if (e instanceof TreeNode)
                         ((TreeNode<K, V>) e).split(this, newTab, j, oldCap);
+
+
+                    //第三种情况：桶位已形成链表
                     else { // preserve order
+                        // 如果这个链表不止一个元素且不是一颗树
+                        // 则分化成两个链表插入到新的桶中去
+                        // 比如，假如原来容量为4，3、7、11、15这四个元素都在三号桶中
+                        // 现在扩容到8，则3和11还是在三号桶，7和15要搬移到七号桶中去
+                        // 也就是分化成了两个链表
+                        // 低位链表：存放在扩容之后的数组下标位置，与当前数组的下标位置一致。
                         Node<K, V> loHead = null, loTail = null;
+                        // 高位链表：存放在扩容之后的数组下标位置为当前数组的下标位置 + 扩容之前数组的长度。
                         Node<K, V> hiHead = null, hiTail = null;
                         Node<K, V> next;
                         do {
                             next = e.next;
+                            // (e.hash & oldCap) == 0的元素放在低位链表中
+                            //hash-> ...... 1 1111
+                            //hash-> ...... 0 1111
+                            // 0b 10000
                             if ((e.hash & oldCap) == 0) {
                                 if (loTail == null)
                                     loHead = e;
@@ -833,6 +900,7 @@ public class HashMap<K, V> extends AbstractMap<K, V>
                                     loTail.next = e;
                                 loTail = e;
                             } else {
+                                // (e.hash & oldCap) != 0的元素放在高位链表中
                                 if (hiTail == null)
                                     hiHead = e;
                                 else
@@ -840,10 +908,13 @@ public class HashMap<K, V> extends AbstractMap<K, V>
                                 hiTail = e;
                             }
                         } while ((e = next) != null);
+                        // 遍历完成分化成两个链表了
+                        // 低位链表在新桶中的位置与旧桶一样（即3和11还在三号桶中）
                         if (loTail != null) {
                             loTail.next = null;
                             newTab[j] = loHead;
                         }
+                        // 高位链表在新桶中的位置正好是原来的位置加上旧容量（即7和15搬移到七号桶了）
                         if (hiTail != null) {
                             hiTail.next = null;
                             newTab[j + oldCap] = hiHead;
@@ -920,20 +991,38 @@ public class HashMap<K, V> extends AbstractMap<K, V>
      */
     final Node<K, V> removeNode(int hash, Object key, Object value,
                                 boolean matchValue, boolean movable) {
+        //引用当前hashmap中的散列表
         Node<K, V>[] tab;
+        //当前node元素
         Node<K, V> p;
+        //表示寻址结果
         int n, index;
+
+        // 如果桶的数量大于0且待删除的元素所在的桶的第一个元素不为空，需要进行查找操作并且删除
+        //p：指向某个桶位
         if ((tab = table) != null && (n = tab.length) > 0 &&
                 (p = tab[index = (n - 1) & hash]) != null) {
+
+            //node:查找到的结果
+            //e:当前Node的下一个元素
             Node<K, V> node = null, e;
             K k;
             V v;
+            //第一种情况：当前桶位中的元素 即为 你要删除的元素
             if (p.hash == hash &&
-                    ((k = p.key) == key || (key != null && key.equals(k))))
+                    ((k = p.key) == key || (key != null && key.equals(k)))) {
                 node = p;
+            }
+
+            //说明当前桶位要么是链表，要么是树
             else if ((e = p.next) != null) {
-                if (p instanceof TreeNode)
+                //第二种情况：当前桶位是红黑树
+                if (p instanceof TreeNode) {
+                    //红黑树的查找操作
                     node = ((TreeNode<K, V>) p).getTreeNode(hash, key);
+                }
+
+                //第三种情况：链表的情况 遍历
                 else {
                     do {
                         if (e.hash == hash &&
@@ -946,12 +1035,21 @@ public class HashMap<K, V> extends AbstractMap<K, V>
                     } while ((e = e.next) != null);
                 }
             }
+
+            //判断node不为空的话，说明按照ke查找到需要删除的数据了，看参数是否需要匹配value值，
+            // 如果不需要匹配直接删除，如果需要匹配则看value值是否与传入的value相等
             if (node != null && (!matchValue || (v = node.value) == value ||
                     (value != null && value.equals(v)))) {
+
+                //第一种情况：待删除的结点是树，调用删除
                 if (node instanceof TreeNode)
                     ((TreeNode<K, V>) node).removeTreeNode(this, tab, movable);
+
+                //第二种情况：待删除的元素是第一个元素，把第二个元素移到第一的位置
                 else if (node == p)
                     tab[index] = node.next;
+
+                //第三种情况：链表的情况，删除node结点
                 else
                     p.next = node.next;
                 ++modCount;
